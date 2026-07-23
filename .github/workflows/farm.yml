@@ -1,0 +1,79 @@
+name: DEX.DO Farmer
+
+on:
+  schedule:
+    # Every 10 minutes (GitHub cron is best-effort, may delay 5-15 min during peak)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    # Manual trigger from GitHub UI / API
+
+# Prevent overlapping runs (wallet nonce lock)
+concurrency:
+  group: dexdo-farmer-single
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  farm:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            /home/runner/.local/bin
+            /tmp/abi
+            /tmp/dexdo-work/contracts
+          key: dexdo-tvm-tools-v1
+
+      - name: Prepare dirs
+        run: |
+          mkdir -p $HOME/.local/bin /tmp/abi /tmp/dexdo-work/contracts
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Write wallet seed
+        env:
+          WALLET_SEED: ${{ secrets.WALLET_SEED }}
+        run: |
+          echo "$WALLET_SEED" > /tmp/wallet.seed
+          chmod 600 /tmp/wallet.seed
+
+      - name: Run one farm cycle
+        id: cycle
+        env:
+          WALLET_ADDR: ${{ secrets.WALLET_ADDR }}
+          WALLET_SEED_FILE: /tmp/wallet.seed
+          DEST_WALLET: ${{ secrets.DEST_WALLET }}
+          PN_POOL: /tmp/pn_pool.json
+          LOG_FILE: /tmp/cycle.log
+        run: |
+          bash cycle.sh
+          # extract wallet balance for summary
+          if [ -f /tmp/cycle.log ]; then
+            echo "### Cycle log" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -40 /tmp/cycle.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Append log to history (commit)
+        if: always()
+        run: |
+          git config user.email "farmer@dexdo.local"
+          git config user.name "dexdo-farmer"
+          mkdir -p logs
+          TS=$(date -u +%Y%m%dT%H%M%SZ)
+          if [ -f /tmp/cycle.log ]; then
+            cp /tmp/cycle.log "logs/cycle_${TS}.log"
+            # keep only last 50 logs
+            ls -t logs/cycle_*.log 2>/dev/null | tail -n +51 | xargs -r rm
+            git add logs/
+            git commit -m "cycle ${TS}" || echo "nothing to commit"
+            git push || echo "push failed (non-fatal)"
+          fi
