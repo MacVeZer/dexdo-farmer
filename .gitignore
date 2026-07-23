@@ -1,8 +1,7 @@
-logs/
-*.log
 *.recovery.json
 pn_pool*.json
 .env
 *.seed
 *.token
 *.keys.json
+*.local.log

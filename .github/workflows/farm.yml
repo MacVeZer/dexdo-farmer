@@ -18,7 +18,7 @@ permissions:
 jobs:
   farm:
     runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,9 +71,8 @@ jobs:
           TS=$(date -u +%Y%m%dT%H%M%SZ)
           if [ -f /tmp/cycle.log ]; then
             cp /tmp/cycle.log "logs/cycle_${TS}.log"
-            # keep only last 50 logs
             ls -t logs/cycle_*.log 2>/dev/null | tail -n +51 | xargs -r rm
-            git add logs/
+            git add -f logs/
             git commit -m "cycle ${TS}" || echo "nothing to commit"
             git push || echo "push failed (non-fatal)"
           fi
