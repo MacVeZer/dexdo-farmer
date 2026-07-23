@@ -33,10 +33,12 @@ setup() {
   if ! command -v tvm-cli >/dev/null 2>&1; then
     log "installing tvm-cli..."
     mkdir -p /tmp/tvm-cli
+    # pin to known-good version (avoid breaking on latest changes)
     curl -fsSL -o /tmp/tvm-cli.tar.gz \
-      "https://github.com/tvmlabs/tvm-sdk/releases/latest/download/tvm-cli-3.0.4.an-linux-musl-amd64.tar.gz"
+      "https://github.com/tvmlabs/tvm-sdk/releases/download/v3.0.4.an/tvm-cli-3.0.4.an-linux-musl-amd64.tar.gz"
     tar -xzf /tmp/tvm-cli.tar.gz -C /tmp/tvm-cli
     cp /tmp/tvm-cli/tvm-cli "$HOME/.local/bin/"
+    chmod +x "$HOME/.local/bin/tvm-cli"
   fi
 
   # Download contracts manifest
@@ -62,13 +64,23 @@ setup() {
 }
 
 # ---------- Deploy PN (with resume support) ----------
+# Note: dexdo note deploy does both a deposit voucher (NACKL → PN) and a SHELL gas voucher.
+# The SHELL gas voucher frequently fails on-shellnet (RootPN.sendEccShellToPrivateNote rejects).
+# We work around by: letting deposit voucher finish (creates PN with NACKL),
+# then funding PN with SHELL directly via the giver (sendCurrency).
 deploy_pn() {
   local pool="$1" rec="$2"
   log "deploying PN -> $pool"
   rm -f /tmp/dexdo-note-deploy-wallet-*.lock
 
-  # attempt 1 (fresh or resume)
-  dexdo note deploy \
+  # If pool already exists from a prior successful run, skip entirely
+  if [ -f "$pool" ]; then
+    log "  pool already exists; skipping deploy"
+    return 0
+  fi
+
+  # attempt 1 (fresh or resume) — bounded to 8 min so we don't burn the whole 45-min budget
+  timeout 480 dexdo note deploy \
     --multisig-address "$WALLET_ADDR" \
     --multisig-seed-file "$WALLET_SEED_FILE" \
     --nominal N10000 --token-type nackl \
@@ -77,9 +89,45 @@ deploy_pn() {
     > /tmp/deploy.log 2>&1
   if [ -f "$pool" ]; then return 0; fi
 
-  log "first attempt did not finish; resuming..."
+  # Pool not yet written. Check if PN was deployed on-chain (recovery state has pn_address).
+  # If yes, the SHELL-voucher step failed (expected) — we proceed with giver funding.
+  if [ -f "$rec" ]; then
+    local pn_addr
+    pn_addr=$(python3 -c "import json; d=json.load(open('$rec')); print(d.get('pn_address') or '')" 2>/dev/null)
+    if [ -n "$pn_addr" ] && [ "$pn_addr" != "None" ] && [ "$pn_addr" != "null" ]; then
+      log "  PN deployed on-chain ($pn_addr) but pool write failed (SHELL voucher); finalizing manually"
+      # Build pool file from recovery state
+      python3 -c "
+import json
+d = json.load(open('$rec'))
+pool = {
+    'version': 1,
+    'notes': [{
+        'address': d['pn_address'],
+        'owner_public_key_hex': d['owner_public_key_hex'],
+        'owner_secret_key_hex': d['owner_secret_key_hex'],
+        'nominal': d['nominal'],
+        'token_type': d['token_type'],
+        'raw_value': d['raw_value'],
+        'ecc_shell_deposit': d['ecc_shell_deposit'],
+        'funding_multisig_address': d['funding_multisig_address'],
+        'endpoint': d['endpoint'],
+        'deployed_at_unix': d.get('deployed_at_unix'),
+        'deposit_identifier_hash': d.get('deposit_identifier_hash'),
+    }]
+}
+with open('$pool', 'w') as f: json.dump(pool, f, indent=2)
+" 2>&1
+      if [ -f "$pool" ]; then
+        log "  pool file written manually"
+        return 0
+      fi
+    fi
+  fi
+
+  log "first attempt did not finish; resuming (bounded 4 min)..."
   sleep 5
-  dexdo note deploy \
+  timeout 240 dexdo note deploy \
     --multisig-address "$WALLET_ADDR" \
     --multisig-seed-file "$WALLET_SEED_FILE" \
     --nominal N10000 --token-type nackl \
@@ -87,6 +135,35 @@ deploy_pn() {
     --pool "$pool" --recovery "$rec" \
     >> /tmp/deploy.log 2>&1
   if [ -f "$pool" ]; then return 0; fi
+  # check recovery again after second attempt
+  if [ -f "$rec" ]; then
+    pn_addr=$(python3 -c "import json; d=json.load(open('$rec')); print(d.get('pn_address') or '')" 2>/dev/null)
+    if [ -n "$pn_addr" ] && [ "$pn_addr" != "None" ] && [ "$pn_addr" != "null" ]; then
+      log "  PN deployed on-chain ($pn_addr) after retry; finalizing manually"
+      python3 -c "
+import json
+d = json.load(open('$rec'))
+pool = {
+    'version': 1,
+    'notes': [{
+        'address': d['pn_address'],
+        'owner_public_key_hex': d['owner_public_key_hex'],
+        'owner_secret_key_hex': d['owner_secret_key_hex'],
+        'nominal': d['nominal'],
+        'token_type': d['token_type'],
+        'raw_value': d['raw_value'],
+        'ecc_shell_deposit': d['ecc_shell_deposit'],
+        'funding_multisig_address': d['funding_multisig_address'],
+        'endpoint': d['endpoint'],
+        'deployed_at_unix': d.get('deployed_at_unix'),
+        'deposit_identifier_hash': d.get('deposit_identifier_hash'),
+    }]
+}
+with open('$pool', 'w') as f: json.dump(pool, f, indent=2)
+" 2>&1
+      [ -f "$pool" ] && return 0
+    fi
+  fi
 
   log "deploy FAILED"
   tail -5 /tmp/deploy.log
