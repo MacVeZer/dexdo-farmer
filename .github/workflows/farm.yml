@@ -2,9 +2,8 @@ name: DEX.DO Farmer
 
 on:
   schedule:
-    # Every 15 minutes — recovery state is cached between runs,
-    # so a deploy can resume across multiple cron ticks if needed
-    - cron: '*/15 * * * *'
+    # Every 20 minutes — gives 5 min gap between runs (run timeout is 15 min)
+    - cron: '*/20 * * * *'
   workflow_dispatch:
 
 # Prevent overlapping runs (wallet nonce lock)
@@ -18,7 +17,7 @@ permissions:
 jobs:
   farm:
     runs-on: ubuntu-22.04
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
