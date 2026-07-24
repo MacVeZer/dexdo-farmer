@@ -1,0 +1,67 @@
+[2026-07-24T07:00:27Z] === setup ===
+[2026-07-24T07:00:27Z] setup OK
+[2026-07-24T07:00:28Z]   wallet ecc: ecc:             {"1":"50000000000000","2":"13400000000000"}
+[2026-07-24T07:00:28Z]   NACKL=50000000000000 SHELL=13400000000000 VMSHELL=71738202000
+[2026-07-24T07:00:28Z] seller PN pool already exists
+[2026-07-24T07:00:28Z] seller PN: 0:8518c261c0820c054b928a9daf7727b64306913360837a0c2cc100603096e50e
+[2026-07-24T07:00:29Z] PN SHELL raw=175000000000
+[2026-07-24T07:00:29Z] === seller attempt 1/5 (nonce=877429, elapsed=0s) ===
+[2026-07-24T07:00:29Z] provisioning deal (nonce=877429)...
+[2026-07-24T07:00:40Z]   deal provisioned: 0:bd91227784dd130579e4798064df275b16c555bb4321e04cea364b586f02202c
+[2026-07-24T07:00:40Z] launching seller gateway (timeout 300s)...
+Error: policy (/home/runner/.config/dexdo/policy.json) is missing or unreadable - dexdo seller will not place an order.
+Unanswered/invalid (no defaults allowed):
+  seller.* -> all required policy keys
+Run `dexdo policy init` to scaffold, fill every field, then retry.
+Cause: read policy /home/runner/.config/dexdo/policy.json: No such file or directory (os error 2)
+[2026-07-24T07:00:40Z] seller gateway exited (rc=1)
+[2026-07-24T07:00:40Z] seller crashed (rc=1), retrying with new nonce...
+[2026-07-24T07:00:50Z] === seller attempt 2/5 (nonce=878450, elapsed=21s) ===
+[2026-07-24T07:00:50Z] provisioning deal (nonce=878450)...
+[2026-07-24T07:01:01Z]   deal provisioned: 0:27a5bde656ac6ecdd17b22028cc8c40be16f3645d0f686afca0fb1b896e8d4a4
+[2026-07-24T07:01:01Z] launching seller gateway (timeout 300s)...
+Error: policy (/home/runner/.config/dexdo/policy.json) is missing or unreadable - dexdo seller will not place an order.
+Unanswered/invalid (no defaults allowed):
+  seller.* -> all required policy keys
+Run `dexdo policy init` to scaffold, fill every field, then retry.
+Cause: read policy /home/runner/.config/dexdo/policy.json: No such file or directory (os error 2)
+[2026-07-24T07:01:01Z] seller gateway exited (rc=1)
+[2026-07-24T07:01:01Z] seller crashed (rc=1), retrying with new nonce...
+[2026-07-24T07:01:11Z] === seller attempt 3/5 (nonce=879471, elapsed=42s) ===
+[2026-07-24T07:01:11Z] provisioning deal (nonce=879471)...
+[2026-07-24T07:01:21Z]   deal provisioned: 0:734aca295058c23b7c8ea017ff673587ae97dc733357752c271ddc49dd97269f
+[2026-07-24T07:01:21Z] launching seller gateway (timeout 300s)...
+Error: policy (/home/runner/.config/dexdo/policy.json) is missing or unreadable - dexdo seller will not place an order.
+Unanswered/invalid (no defaults allowed):
+  seller.* -> all required policy keys
+Run `dexdo policy init` to scaffold, fill every field, then retry.
+Cause: read policy /home/runner/.config/dexdo/policy.json: No such file or directory (os error 2)
+[2026-07-24T07:01:21Z] seller gateway exited (rc=1)
+[2026-07-24T07:01:21Z] seller crashed (rc=1), retrying with new nonce...
+[2026-07-24T07:01:31Z] === seller attempt 4/5 (nonce=880491, elapsed=62s) ===
+[2026-07-24T07:01:31Z] provisioning deal (nonce=880491)...
+[2026-07-24T07:01:41Z]   deal provisioned: 0:34d0e191793dc928568733a135a3e2762ead5ab29f2b619771d0c18d88a0557c
+[2026-07-24T07:01:41Z] launching seller gateway (timeout 300s)...
+Error: policy (/home/runner/.config/dexdo/policy.json) is missing or unreadable - dexdo seller will not place an order.
+Unanswered/invalid (no defaults allowed):
+  seller.* -> all required policy keys
+Run `dexdo policy init` to scaffold, fill every field, then retry.
+Cause: read policy /home/runner/.config/dexdo/policy.json: No such file or directory (os error 2)
+[2026-07-24T07:01:41Z] seller gateway exited (rc=1)
+[2026-07-24T07:01:41Z] seller crashed (rc=1), retrying with new nonce...
+[2026-07-24T07:01:51Z] === seller attempt 5/5 (nonce=881511, elapsed=82s) ===
+[2026-07-24T07:01:51Z] provisioning deal (nonce=881511)...
+[2026-07-24T07:02:02Z]   deal provisioned: 0:4c1f3b58be293416b64649d1cfb76b55a18fafa44e2f6cf54b32b2d19a601fae
+[2026-07-24T07:02:02Z] launching seller gateway (timeout 300s)...
+Error: policy (/home/runner/.config/dexdo/policy.json) is missing or unreadable - dexdo seller will not place an order.
+Unanswered/invalid (no defaults allowed):
+  seller.* -> all required policy keys
+Run `dexdo policy init` to scaffold, fill every field, then retry.
+Cause: read policy /home/runner/.config/dexdo/policy.json: No such file or directory (os error 2)
+[2026-07-24T07:02:02Z] seller gateway exited (rc=1)
+[2026-07-24T07:02:02Z] seller crashed (rc=1), retrying with new nonce...
+[2026-07-24T07:02:12Z] seller PN 0:8518c261c0820c054b928a9daf7727b64306913360837a0c2cc100603096e50e left active (NOT withdrawn) for future runs
+[2026-07-24T07:02:12Z] === final wallet balance ===
+balance:         0 nanovmshell
+ecc:             {"1":"50000000000000","2":"11349999999998"}
+[2026-07-24T07:02:12Z] === DONE ===
