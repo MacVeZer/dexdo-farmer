@@ -1,0 +1,25 @@
+[2026-07-24T06:38:09Z] === setup ===
+[2026-07-24T06:38:09Z] installing dexdo...
+[2026-07-24T06:38:11Z] installing tvm-cli...
+[2026-07-24T06:38:12Z] tools: dexdo 0.0.15, 
+[2026-07-24T06:38:12Z] setup OK
+[2026-07-24T06:38:12Z] deploying PN -> /tmp/pn_pool.json
+[2026-07-24T06:38:12Z] checking funding wallet balance...
+[2026-07-24T06:38:12Z]   wallet ecc: ecc:             {"1":"40000000000000","2":"4900000000000"}
+[2026-07-24T06:38:12Z]   NACKL=40000000000000  SHELL=4900000000000  VMSHELL=95926606000
+[2026-07-24T06:38:12Z]   pool already exists
+[2026-07-24T06:38:12Z] PN: 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c
+[2026-07-24T06:38:12Z] funding 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c with 1000 SHELL via giver...
+  "aborted": false,
+[2026-07-24T06:38:16Z] find_ask attempt 1/6
+[2026-07-24T06:38:16Z] scanning markets for third-party ask (excluding 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c)...
+[2026-07-24T06:38:30Z] buying: [2026-07-24T06:38:16Z] find_ask attempt 1/6
+[2026-07-24T06:38:16Z] scanning markets for third-party ask (excluding 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c)... pn=0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c
+[2026-07-24T06:38:34Z]   resp: curl: (7) Failed to connect to 127.0.0.1 port 8080 after 0 ms: Connection refused
+[2026-07-24T06:38:34Z]   deal: none
+[2026-07-24T06:38:41Z] withdrawing 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c -> 0:916c7235d75b49d7c4c11a49db10bccaf121bf9661ac2dffa7b1f459565ccbc4
+Error: note 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c was already withdrawn -- `withdrawTokens` is one-shot per note. Re-check the note/wallet on-chain before assuming any remaining balance is withdrawable.
+[2026-07-24T06:38:46Z] === final wallet balance ===
+balance:         0 nanovmshell
+ecc:             {"1":"50000000000000","2":"10299999999998"}
+[2026-07-24T06:38:46Z] === cycle done (with buy) ===
