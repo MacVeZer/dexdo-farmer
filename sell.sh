@@ -227,36 +227,63 @@ main() {
 
   write_models_json
 
-  # Use a fresh nonce each run (unique deals)
-  local nonce
-  nonce=$(date +%s)
-  nonce=$((nonce % 1000000))
-  log "using nonce=$nonce"
+  # Seller retry loop: provision a deal, run seller, if it crashes — retry with new nonce
+  local max_retries=5
+  local retry=0
+  local start_time=$(date +%s)
+  local max_runtime=900   # 15 min total for seller loop
 
-  if ! provision_deal "$pn_addr" "$pn_key" "$nonce"; then
-    log "provision failed; aborting"
-    exit 1
-  fi
+  while [ $retry -lt $max_retries ]; do
+    local elapsed=$(( $(date +%s) - start_time ))
+    [ $elapsed -gt $max_runtime ] && { log "max runtime reached"; break; }
 
-  # Launch seller gateway for 12 minutes
-  log "launching seller gateway (12 min)..."
-  DEXDO_PN_POOL="$POOL" timeout 720 dexdo seller \
-    --market "$MARKET" \
-    --model qwen \
-    --models /tmp/seller/models.json \
-    --note-addr "$pn_addr" \
-    --note-key <(echo "$pn_key") \
-    --gateway-listen 0.0.0.0:8443 \
-    --contracts "$CONTRACTS_DIR/deployed.shellnet.json" \
-    >> "$LOG_FILE" 2>&1
-  log "seller gateway exited"
+    retry=$((retry + 1))
+    local nonce
+    nonce=$(( (date +%s) + retry * 1000 ))
+    nonce=$((nonce % 1000000))
+    log "=== seller attempt $retry/$max_retries (nonce=$nonce, elapsed=${elapsed}s) ==="
 
-  # Withdraw remaining PN balance (only if no stream-lock)
-  log "withdrawing seller PN -> $DEST_WALLET"
-  timeout 90 dexdo note withdraw \
-    --note-addr "$pn_addr" --note-key <(echo "$pn_key") \
-    --to "$DEST_WALLET" \
-    --contracts "$CONTRACTS_DIR/deployed.shellnet.json" 2>&1 | grep -E "submitted|Error|locked" | head -2 >> "$LOG_FILE"
+    if ! provision_deal "$pn_addr" "$pn_key" "$nonce"; then
+      log "provision failed; retrying..."
+      sleep 10
+      continue
+    fi
+
+    # Run seller for up to 5 min per attempt (if it crashes, retry)
+    local seller_timeout=300
+    local remaining=$((max_runtime - elapsed))
+    [ $seller_timeout -gt $remaining ] && seller_timeout=$remaining
+    [ $seller_timeout -lt 60 ] && { log "not enough time for another attempt"; break; }
+
+    log "launching seller gateway (timeout ${seller_timeout}s)..."
+    DEXDO_PN_POOL="$POOL" timeout $seller_timeout dexdo seller \
+      --market "$MARKET" \
+      --model qwen \
+      --models /tmp/seller/models.json \
+      --note-addr "$pn_addr" \
+      --note-key <(echo "$pn_key") \
+      --gateway-listen 127.0.0.1:8443 \
+      --contracts "$CONTRACTS_DIR/deployed.shellnet.json" \
+      >> "$LOG_FILE" 2>&1
+    local seller_rc=$?
+    log "seller gateway exited (rc=$seller_rc)"
+
+    # Check if a deal was matched (look for stream/handover in log)
+    if grep -qE "stream|handover|InferenceFilled|opened|probe_accepted" "$LOG_FILE" 2>/dev/null; then
+      log "DEAL MATCHED! Waiting for stream to complete..."
+      sleep 60
+      break
+    fi
+
+    # If seller exited cleanly (not timeout), it crashed — retry with new nonce
+    [ $seller_rc -eq 124 ] && { log "seller timeout (normal)"; break; }
+    log "seller crashed (rc=$seller_rc), retrying with new nonce..."
+    sleep 10
+  done
+
+  # DO NOT withdraw seller PN — keep it active for next run (withdrawn PN can't sell)
+  # The PN balance accumulates SHELL from sales, which is fine.
+  log "seller PN $pn_addr left active (NOT withdrawn) for future runs"
 
   log "=== final wallet balance ==="
   tvm-cli -u "$ENDPOINT" account "${DEST_WALLET#0:}::${DEST_WALLET#0:}" 2>/dev/null | grep -E "balance|ecc" | head -3 >> "$LOG_FILE"
