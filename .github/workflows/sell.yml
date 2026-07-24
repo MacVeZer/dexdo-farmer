@@ -38,9 +38,9 @@ jobs:
             /tmp/seller_pn_pool.json
             /tmp/seller_pn_pool.json.recovery.json
             /tmp/market.json
-          key: seller-pn-pool
+          key: seller-pn-pool-v2
           restore-keys: |
-            seller-pn-pool
+            seller-pn-pool-v2
 
       - name: Prepare dirs
         run: |
@@ -95,4 +95,4 @@ jobs:
             /tmp/seller_pn_pool.json
             /tmp/seller_pn_pool.json.recovery.json
             /tmp/market.json
-          key: seller-pn-pool-${{ github.run_id }}-${{ github.run_attempt }}
+          key: seller-pn-pool-v2-${{ github.run_id }}-${{ github.run_attempt }}
