@@ -1,0 +1,22 @@
+[2026-07-24T02:17:48Z] === setup ===
+[2026-07-24T02:17:48Z] installing dexdo...
+[2026-07-24T02:17:49Z] installing tvm-cli...
+[2026-07-24T02:17:50Z] tools: dexdo 0.0.15, 
+[2026-07-24T02:17:50Z] setup OK
+[2026-07-24T02:17:50Z] deploying PN -> /tmp/pn_pool.json
+[2026-07-24T02:17:50Z]   attempt 1 (bounded 6 min)
+[2026-07-24T02:23:50Z]   attempt 2: resume (bounded 4 min)
+[2026-07-24T02:27:53Z]   deploy FAILED (both attempts)
+[2026-07-24T02:27:53Z]   --- deploy1 tail ---
+[2m2026-07-24T02:19:24.052994Z[0m [32m INFO[0m [2mhalo2_base::gates::flex_gate[0m[2m:[0m Poisoned rows after FlexGateConfig::configure 9
+[2m2026-07-24T02:19:24.053028Z[0m [32m INFO[0m [2mhalo2_base::gates::range[0m[2m:[0m Poisoned rows after RangeConfig::configure 9
+note deploy recovery: owner key persisted to /tmp/pn_pool.json.recovery.json (0600) before wallet spend. If interrupted before recovery is finalized, rerun `dexdo note deploy --recovery /tmp/pn_pool.json.recovery.json --pool <pool>`; if recovery is already finalized but pn_pool.json is missing, run `dexdo note recover --recovery /tmp/pn_pool.json.recovery.json --pool <pool>`.
+note deploy recovery: recorded deposit voucher checkpoint in /tmp/pn_pool.json.recovery.json before wallet spend.
+note deploy recovery: marked deposit voucher wallet submit as uncertain in /tmp/pn_pool.json.recovery.json; reruns will not submit a second wallet spend.
+[2026-07-24T02:27:53Z]   --- deploy2 tail ---
+note deploy: in-process gosh.ackinacki -- wallet 0:c06d32ac232485703ce360cf7d15529d6f060fc82d1be1551ca4b722bf4966f4 funds a N10000 NACKL PrivateNote on https://shellnet.ackinacki.org ...
+note deploy recovery: using existing state file /tmp/pn_pool.json.recovery.json.
+note deploy recovery: owner key persisted to /tmp/pn_pool.json.recovery.json (0600) before wallet spend. If interrupted before recovery is finalized, rerun `dexdo note deploy --recovery /tmp/pn_pool.json.recovery.json --pool <pool>`; if recovery is already finalized but pn_pool.json is missing, run `dexdo note recover --recovery /tmp/pn_pool.json.recovery.json --pool <pool>`.
+note deploy recovery: no on-chain PrivateNote recorded yet; continuing deploy with the persisted owner key in /tmp/pn_pool.json.recovery.json.
+note deploy recovery: resuming deposit voucher from /tmp/pn_pool.json.recovery.json; waiting/proving the existing skUCommit without submitting another wallet spend.
+[2026-07-24T02:27:53Z] deploy failed; aborting (will retry next cron)
