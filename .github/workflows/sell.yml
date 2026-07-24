@@ -69,24 +69,6 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           LOG_FILE: /tmp/seller.log
         run: |
-          # Patch dexdo binary: increase OFFER_ACCEPTANCE_TIMEOUT 45->300, POST_SELL_OFFER_SUBMIT_TIMEOUT 120->300
-          # This fixes seller daemon crashing on slow shellnet chain
-          python3 -c "
-import struct
-p = '$HOME/.local/bin/dexdo'
-with open(p, 'rb') as f: d = bytearray(f.read())
-# Find pair: 45 (u64 LE) at offset X, 120 (u64 LE) at offset X+32
-target_45 = struct.pack('<Q', 45)
-target_120 = struct.pack('<Q', 120)
-for i in range(len(d)-40):
-    if d[i:i+8] == target_45 and d[i+32:i+40] == target_120:
-        struct.pack_into('<Q', d, i, 300)
-        struct.pack_into('<Q', d, i+32, 300)
-        print(f'Patched offsets 0x{i:x} and 0x{i+32:x}: 45->300, 120->300')
-        break
-with open(p, 'wb') as f: f.write(d)
-import os; os.chmod(p, 0o755)
-"
           bash sell.sh
 
       - name: Append log to history (commit)
