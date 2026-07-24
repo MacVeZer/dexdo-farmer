@@ -1,0 +1,8 @@
+[2026-07-24T03:11:14Z] === setup ===
+[2026-07-24T03:11:14Z] installing dexdo...
+[2026-07-24T03:11:16Z] installing tvm-cli...
+[2026-07-24T03:11:16Z] tools: dexdo 0.0.15, 
+[2026-07-24T03:11:16Z] setup OK
+[2026-07-24T03:11:16Z] deploying PN -> /tmp/pn_pool.json
+[2026-07-24T03:11:16Z]   attempt 1 (bounded 12 min)
+[2026-07-24T03:20:55Z]   attempt 2: resume (bounded 8 min)
