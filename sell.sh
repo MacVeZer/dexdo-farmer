@@ -239,7 +239,7 @@ main() {
 
     retry=$((retry + 1))
     local nonce
-    nonce=$(( (date +%s) + retry * 1000 ))
+    nonce=$(( $(date +%s) + retry * 1000 ))
     nonce=$((nonce % 1000000))
     log "=== seller attempt $retry/$max_retries (nonce=$nonce, elapsed=${elapsed}s) ==="
 
