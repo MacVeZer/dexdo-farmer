@@ -1,0 +1,24 @@
+[2026-07-24T04:21:19Z] === setup ===
+[2026-07-24T04:21:19Z] tools: dexdo 0.0.15, 
+[2026-07-24T04:21:19Z] setup OK
+[2026-07-24T04:21:19Z] deploying PN -> /tmp/pn_pool.json
+[2026-07-24T04:21:19Z] checking funding wallet balance...
+[2026-07-24T04:21:20Z]   wallet ecc: ecc:             {"1":"50000000000000","2":"5000000000000"}
+[2026-07-24T04:21:20Z]   NACKL=50000000000000  SHELL=5000000000000  VMSHELL=99941688000
+[2026-07-24T04:21:20Z]   attempt 1 (bounded 8 min)
+[2026-07-24T04:28:18Z]   attempt 1 OK
+[2026-07-24T04:28:18Z] PN: 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c
+[2026-07-24T04:28:18Z] funding 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c with 1000 SHELL via giver...
+  "aborted": false,
+[2026-07-24T04:28:23Z] find_ask attempt 1/6
+[2026-07-24T04:28:23Z] scanning markets for third-party ask (excluding 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c)...
+[2026-07-24T04:28:42Z] buying: [2026-07-24T04:28:23Z] find_ask attempt 1/6
+[2026-07-24T04:28:23Z] scanning markets for third-party ask (excluding 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c)... pn=0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c
+[2026-07-24T04:28:46Z]   resp: curl: (7) Failed to connect to 127.0.0.1 port 8080 after 0 ms: Connection refused
+[2026-07-24T04:28:46Z]   deal: none
+[2026-07-24T04:28:53Z] withdrawing 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c -> 0:916c7235d75b49d7c4c11a49db10bccaf121bf9661ac2dffa7b1f459565ccbc4
+withdrawTokens submitted for note 0:f93826e27924e3e92a46ad2843ed9ae84518cc018079f3e9a78c3724b47c0c8c -> 0:916c7235d75b49d7c4c11a49db10bccaf121bf9661ac2dffa7b1f459565ccbc4
+[2026-07-24T04:28:59Z] === final wallet balance ===
+balance:         0 nanovmshell
+ecc:             {"1":"40000000000000","2":"4299999999998"}
+[2026-07-24T04:29:00Z] === cycle done (with buy) ===
