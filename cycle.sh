@@ -272,8 +272,13 @@ main() {
   : > "$LOG_FILE"
   setup
 
-  # Always start clean — fresh owner key, fresh recovery, fresh pool
-  rm -f "$POOL" "$RECOVERY"
+  # IMPORTANT: do NOT delete pool/recovery here. We rely on cross-run recovery state
+  # when a deposit voucher was submitted but VoucherGenerated event hadn't arrived yet.
+  # GitHub Actions cache /tmp/abi and /tmp/contracts but NOT /tmp/pn_pool* (they're
+  # in /tmp which is fresh per run, EXCEPT when we explicitly cache them).
+
+  # If pool file exists from a prior successful deploy in this same run, use it.
+  # Otherwise, deploy_pn will check recovery state and resume if possible.
 
   if ! deploy_pn; then
     log "deploy failed; aborting (will retry next cron)"
@@ -286,6 +291,9 @@ main() {
     fi
     exit 1
   fi
+
+  # After successful deploy, clean up recovery state so next run starts fresh
+  rm -f "$RECOVERY"
 
   local pn_addr pn_key
   pn_addr=$(python3 -c "import json; print(json.load(open('$POOL'))['notes'][-1]['address'])" 2>/dev/null)

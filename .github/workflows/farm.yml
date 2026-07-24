@@ -2,9 +2,9 @@ name: DEX.DO Farmer
 
 on:
   schedule:
-    # Every 30 minutes — gives each run enough time to deploy+buy+withdraw
-    # without overlap from the next cron tick
-    - cron: '*/30 * * * *'
+    # Every 15 minutes — recovery state is cached between runs,
+    # so a deploy can resume across multiple cron ticks if needed
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 # Prevent overlapping runs (wallet nonce lock)
@@ -31,6 +31,16 @@ jobs:
             /tmp/abi
             /tmp/contracts
           key: dexdo-tvm-tools-v2
+
+      - name: Restore PN recovery state
+        uses: actions/cache@v4
+        with:
+          path: |
+            /tmp/pn_pool.json
+            /tmp/pn_pool.json.recovery.json
+          key: pn-recovery-state
+          restore-keys: |
+            pn-recovery-state
 
       - name: Prepare dirs
         run: |
@@ -74,3 +84,12 @@ jobs:
             git commit -m "cycle ${TS}" || echo "nothing to commit"
             git push || echo "push failed (non-fatal)"
           fi
+
+      - name: Save PN recovery state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /tmp/pn_pool.json
+            /tmp/pn_pool.json.recovery.json
+          key: pn-recovery-state-${{ github.run_id }}-${{ github.run_attempt }}
