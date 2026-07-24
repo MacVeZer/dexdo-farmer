@@ -1,0 +1,98 @@
+name: DEX.DO Seller
+
+on:
+  schedule:
+    # Every 30 minutes — re-launches the seller gateway
+    # (gateway itself doesn't auto-restart, so we restart the runner)
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: dexdo-seller
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sell:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            /home/runner/.local/bin
+            /tmp/abi
+            /tmp/contracts
+          key: dexdo-tvm-tools-v2
+
+      - name: Restore seller PN pool
+        uses: actions/cache@v4
+        with:
+          path: |
+            /tmp/seller_pn_pool.json
+            /tmp/seller_pn_pool.json.recovery.json
+            /tmp/market.json
+          key: seller-pn-pool
+          restore-keys: |
+            seller-pn-pool
+
+      - name: Prepare dirs
+        run: |
+          mkdir -p $HOME/.local/bin /tmp/abi /tmp/contracts /tmp/seller
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Write wallet seed
+        env:
+          WALLET_SEED: ${{ secrets.WALLET_SEED }}
+        run: |
+          printf '%s\n' "$WALLET_SEED" > /tmp/wallet.seed
+          chmod 600 /tmp/wallet.seed
+
+      - name: Write OpenRouter API key
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          printf '%s' "$OPENROUTER_API_KEY" > /tmp/openrouter.key
+          chmod 600 /tmp/openrouter.key
+
+      - name: Run seller gateway
+        env:
+          WALLET_ADDR: ${{ secrets.WALLET_ADDR }}
+          WALLET_SEED_FILE: /tmp/wallet.seed
+          DEST_WALLET: ${{ secrets.DEST_WALLET }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          LOG_FILE: /tmp/seller.log
+        run: |
+          bash sell.sh
+
+      - name: Append log to history (commit)
+        if: always()
+        run: |
+          git config user.email "farmer@dexdo.local"
+          git config user.name "dexdo-farmer"
+          mkdir -p logs-seller
+          TS=$(date -u +%Y%m%dT%H%M%SZ)
+          if [ -f /tmp/seller.log ]; then
+            cp /tmp/seller.log "logs-seller/sell_${TS}.log"
+            ls -t logs-seller/sell_*.log 2>/dev/null | tail -n +51 | xargs -r rm
+            git add -f logs-seller/
+            git commit -m "sell ${TS}" || echo "nothing to commit"
+            git pull --rebase origin main 2>/dev/null || true
+            git push || echo "push failed (non-fatal)"
+          fi
+
+      - name: Save seller PN pool
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /tmp/seller_pn_pool.json
+            /tmp/seller_pn_pool.json.recovery.json
+            /tmp/market.json
+          key: seller-pn-pool-${{ github.run_id }}-${{ github.run_attempt }}
