@@ -2,10 +2,10 @@ name: DEX.DO Farmer
 
 on:
   schedule:
-    # Every 10 minutes (GitHub cron is best-effort, may delay 5-15 min during peak)
-    - cron: '*/10 * * * *'
+    # Every 30 minutes — gives each run enough time to deploy+buy+withdraw
+    # without overlap from the next cron tick
+    - cron: '*/30 * * * *'
   workflow_dispatch:
-    # Manual trigger from GitHub UI / API
 
 # Prevent overlapping runs (wallet nonce lock)
 concurrency:
@@ -18,7 +18,7 @@ permissions:
 jobs:
   farm:
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,23 +29,22 @@ jobs:
           path: |
             /home/runner/.local/bin
             /tmp/abi
-            /tmp/dexdo-work/contracts
-          key: dexdo-tvm-tools-v1
+            /tmp/contracts
+          key: dexdo-tvm-tools-v2
 
       - name: Prepare dirs
         run: |
-          mkdir -p $HOME/.local/bin /tmp/abi /tmp/dexdo-work/contracts
+          mkdir -p $HOME/.local/bin /tmp/abi /tmp/contracts
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Write wallet seed
         env:
           WALLET_SEED: ${{ secrets.WALLET_SEED }}
         run: |
-          echo "$WALLET_SEED" > /tmp/wallet.seed
+          printf '%s\n' "$WALLET_SEED" > /tmp/wallet.seed
           chmod 600 /tmp/wallet.seed
 
       - name: Run one farm cycle
-        id: cycle
         env:
           WALLET_ADDR: ${{ secrets.WALLET_ADDR }}
           WALLET_SEED_FILE: /tmp/wallet.seed
@@ -54,11 +53,10 @@ jobs:
           LOG_FILE: /tmp/cycle.log
         run: |
           bash cycle.sh
-          # extract wallet balance for summary
           if [ -f /tmp/cycle.log ]; then
             echo "### Cycle log" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            tail -40 /tmp/cycle.log >> $GITHUB_STEP_SUMMARY
+            tail -50 /tmp/cycle.log >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
 

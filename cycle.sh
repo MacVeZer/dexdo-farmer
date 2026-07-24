@@ -1,43 +1,44 @@
 #!/usr/bin/env bash
 # DEX.DO Season 1 — single-cycle auto-buyer for GitHub Actions
-# Each run: deploy PN → fund → find ask → buy → close → withdraw → commit state
-# Exits 0 on success, 1 on transient failure (retry next cron), 2 on hard failure
-set -uo pipefail
-export PATH="$HOME/.local/bin:$HOME/.local/tvm-cli:$PATH"
-export DEXDO_PN_POOL="${PN_POOL:-/tmp/pn_pool.json}"
+# Each run: deploy PN → fund → find ask → buy → close → withdraw → commit log
+# Robust against transient failures; uses dexdo's recovery state for resume
+set +e  # NO set -e: we handle errors explicitly
+export PATH="$HOME/.local/bin:$PATH"
 
 WALLET_ADDR="${WALLET_ADDR:?}"
 WALLET_SEED_FILE="${WALLET_SEED_FILE:?}"
 DEST_WALLET="${DEST_WALLET:?}"
 ENDPOINT="https://shellnet.ackinacki.org"
 GIVER="1111111111111111111111111111111111111111111111111111111111111111"
-CONTRACTS_DIR="${CONTRACTS_DIR:-contracts}"
+CONTRACTS_DIR="/tmp/contracts"
 LOG_FILE="${LOG_FILE:-/tmp/cycle.log}"
+POOL="/tmp/pn_pool.json"
+RECOVERY="${POOL}.recovery.json"
 
 log() { printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" | tee -a "$LOG_FILE"; }
 
 # ---------- Setup ----------
 setup() {
   log "=== setup ==="
-  cd /tmp && mkdir -p dexdo-work && cd dexdo-work
-  CONTRACTS_DIR="/tmp/dexdo-work/contracts"
-  mkdir -p "$CONTRACTS_DIR"
+  mkdir -p "$HOME/.local/bin" "$CONTRACTS_DIR" /tmp/abi
 
-  # Install dexdo if not cached
+  # CRITICAL: clear stale wallet lock from previous run
+  rm -f /tmp/dexdo-note-deploy-wallet-*.lock
+
+  # Install dexdo if missing
   if ! command -v dexdo >/dev/null 2>&1; then
     log "installing dexdo..."
     curl -fsSL https://github.com/gosh-sh/dexdo-cli/releases/latest/download/install.sh | sh 2>&1 | tail -3
   fi
 
-  # Install tvm-cli if not cached
+  # Install tvm-cli if missing
   if ! command -v tvm-cli >/dev/null 2>&1; then
     log "installing tvm-cli..."
-    mkdir -p /tmp/tvm-cli
-    # pin to known-good version (avoid breaking on latest changes)
+    mkdir -p /tmp/tvm-cli-dl
     curl -fsSL -o /tmp/tvm-cli.tar.gz \
       "https://github.com/tvmlabs/tvm-sdk/releases/download/v3.0.4.an/tvm-cli-3.0.4.an-linux-musl-amd64.tar.gz"
-    tar -xzf /tmp/tvm-cli.tar.gz -C /tmp/tvm-cli
-    cp /tmp/tvm-cli/tvm-cli "$HOME/.local/bin/"
+    tar -xzf /tmp/tvm-cli.tar.gz -C /tmp/tvm-cli-dl
+    cp /tmp/tvm-cli-dl/tvm-cli "$HOME/.local/bin/"
     chmod +x "$HOME/.local/bin/tvm-cli"
   fi
 
@@ -48,7 +49,6 @@ setup() {
   fi
 
   # Download ABIs
-  mkdir -p /tmp/abi
   for f in GiverV3.abi.json InferenceOrderBook.abi.json; do
     [ -f "/tmp/abi/$f" ] && continue
     case "$f" in
@@ -58,132 +58,126 @@ setup() {
     curl -fsSL "$url" -o "/tmp/abi/$f"
   done
 
-  dexdo --version
-  tvm-cli --version 2>&1 | head -1
+  log "tools: $(dexdo --version 2>&1), $(tvm-cli --version 2>&1 | head -1)"
   log "setup OK"
 }
 
-# ---------- Deploy PN (with resume support) ----------
-# Note: dexdo note deploy does both a deposit voucher (NACKL → PN) and a SHELL gas voucher.
-# The SHELL gas voucher frequently fails on-shellnet (RootPN.sendEccShellToPrivateNote rejects).
-# We work around by: letting deposit voucher finish (creates PN with NACKL),
-# then funding PN with SHELL directly via the giver (sendCurrency).
+# ---------- Recovery helpers ----------
+recovery_get() {
+  [ -f "$RECOVERY" ] || return 0
+  python3 -c "
+import json, sys
+try:
+    d = json.load(open('$RECOVERY'))
+    v = d.get('$1')
+    if v is None or v == 'None' or v == 'null':
+        print('')
+    else:
+        print(v)
+except Exception:
+    pass
+" 2>/dev/null
+}
+
+finalize_pool_from_recovery() {
+  [ -f "$RECOVERY" ] || return 1
+  local pn_addr
+  pn_addr=$(recovery_get pn_address)
+  [ -z "$pn_addr" ] && return 1
+  [ -f "$POOL" ] && return 0
+  log "  finalizing pool.json from recovery state (pn=$pn_addr)"
+  python3 << EOF
+import json
+d = json.load(open('$RECOVERY'))
+pool = {
+    "version": 1,
+    "notes": [{
+        "address": d["pn_address"],
+        "owner_public_key_hex": d["owner_public_key_hex"],
+        "owner_secret_key_hex": d["owner_secret_key_hex"],
+        "nominal": d["nominal"],
+        "token_type": d["token_type"],
+        "raw_value": d["raw_value"],
+        "ecc_shell_deposit": d["ecc_shell_deposit"],
+        "funding_multisig_address": d["funding_multisig_address"],
+        "endpoint": d["endpoint"],
+        "deployed_at_unix": d.get("deployed_at_unix"),
+        "deposit_identifier_hash": d.get("deposit_identifier_hash"),
+    }]
+}
+with open('$POOL', 'w') as f:
+    json.dump(pool, f, indent=2)
+EOF
+  [ -f "$POOL" ]
+}
+
+# ---------- Deploy PN (multi-attempt with smart recovery) ----------
 deploy_pn() {
-  local pool="$1" rec="$2"
-  log "deploying PN -> $pool"
+  log "deploying PN -> $POOL"
   rm -f /tmp/dexdo-note-deploy-wallet-*.lock
 
-  # If pool already exists from a prior successful run, skip entirely
-  if [ -f "$pool" ]; then
-    log "  pool already exists; skipping deploy"
+  if [ -f "$POOL" ]; then
+    log "  pool already exists"
     return 0
   fi
 
-  # attempt 1 (fresh or resume) — bounded to 8 min so we don't burn the whole 45-min budget
-  timeout 480 dexdo note deploy \
+  if [ -n "$(recovery_get pn_address)" ]; then
+    log "  recovery has pn_address — finalizing pool"
+    finalize_pool_from_recovery && return 0
+  fi
+
+  log "  attempt 1 (bounded 6 min)"
+  timeout 360 dexdo note deploy \
     --multisig-address "$WALLET_ADDR" \
     --multisig-seed-file "$WALLET_SEED_FILE" \
     --nominal N10000 --token-type nackl \
     --endpoint "$ENDPOINT" \
-    --pool "$pool" --recovery "$rec" \
-    > /tmp/deploy.log 2>&1
-  if [ -f "$pool" ]; then return 0; fi
-
-  # Pool not yet written. Check if PN was deployed on-chain (recovery state has pn_address).
-  # If yes, the SHELL-voucher step failed (expected) — we proceed with giver funding.
-  if [ -f "$rec" ]; then
-    local pn_addr
-    pn_addr=$(python3 -c "import json; d=json.load(open('$rec')); print(d.get('pn_address') or '')" 2>/dev/null)
-    if [ -n "$pn_addr" ] && [ "$pn_addr" != "None" ] && [ "$pn_addr" != "null" ]; then
-      log "  PN deployed on-chain ($pn_addr) but pool write failed (SHELL voucher); finalizing manually"
-      # Build pool file from recovery state
-      python3 -c "
-import json
-d = json.load(open('$rec'))
-pool = {
-    'version': 1,
-    'notes': [{
-        'address': d['pn_address'],
-        'owner_public_key_hex': d['owner_public_key_hex'],
-        'owner_secret_key_hex': d['owner_secret_key_hex'],
-        'nominal': d['nominal'],
-        'token_type': d['token_type'],
-        'raw_value': d['raw_value'],
-        'ecc_shell_deposit': d['ecc_shell_deposit'],
-        'funding_multisig_address': d['funding_multisig_address'],
-        'endpoint': d['endpoint'],
-        'deployed_at_unix': d.get('deployed_at_unix'),
-        'deposit_identifier_hash': d.get('deposit_identifier_hash'),
-    }]
-}
-with open('$pool', 'w') as f: json.dump(pool, f, indent=2)
-" 2>&1
-      if [ -f "$pool" ]; then
-        log "  pool file written manually"
-        return 0
-      fi
-    fi
+    --pool "$POOL" --recovery "$RECOVERY" \
+    > /tmp/deploy1.log 2>&1
+  if [ -f "$POOL" ]; then log "  attempt 1 OK"; return 0; fi
+  if [ -n "$(recovery_get pn_address)" ]; then
+    log "  attempt 1: PN on-chain, finalizing"
+    finalize_pool_from_recovery && return 0
   fi
 
-  log "first attempt did not finish; resuming (bounded 4 min)..."
-  sleep 5
+  log "  attempt 2: resume (bounded 4 min)"
+  rm -f /tmp/dexdo-note-deploy-wallet-*.lock
+  sleep 3
   timeout 240 dexdo note deploy \
     --multisig-address "$WALLET_ADDR" \
     --multisig-seed-file "$WALLET_SEED_FILE" \
     --nominal N10000 --token-type nackl \
     --endpoint "$ENDPOINT" \
-    --pool "$pool" --recovery "$rec" \
-    >> /tmp/deploy.log 2>&1
-  if [ -f "$pool" ]; then return 0; fi
-  # check recovery again after second attempt
-  if [ -f "$rec" ]; then
-    pn_addr=$(python3 -c "import json; d=json.load(open('$rec')); print(d.get('pn_address') or '')" 2>/dev/null)
-    if [ -n "$pn_addr" ] && [ "$pn_addr" != "None" ] && [ "$pn_addr" != "null" ]; then
-      log "  PN deployed on-chain ($pn_addr) after retry; finalizing manually"
-      python3 -c "
-import json
-d = json.load(open('$rec'))
-pool = {
-    'version': 1,
-    'notes': [{
-        'address': d['pn_address'],
-        'owner_public_key_hex': d['owner_public_key_hex'],
-        'owner_secret_key_hex': d['owner_secret_key_hex'],
-        'nominal': d['nominal'],
-        'token_type': d['token_type'],
-        'raw_value': d['raw_value'],
-        'ecc_shell_deposit': d['ecc_shell_deposit'],
-        'funding_multisig_address': d['funding_multisig_address'],
-        'endpoint': d['endpoint'],
-        'deployed_at_unix': d.get('deployed_at_unix'),
-        'deposit_identifier_hash': d.get('deposit_identifier_hash'),
-    }]
-}
-with open('$pool', 'w') as f: json.dump(pool, f, indent=2)
-" 2>&1
-      [ -f "$pool" ] && return 0
-    fi
+    --pool "$POOL" --recovery "$RECOVERY" \
+    > /tmp/deploy2.log 2>&1
+  if [ -f "$POOL" ]; then log "  attempt 2 OK"; return 0; fi
+  if [ -n "$(recovery_get pn_address)" ]; then
+    log "  attempt 2: PN on-chain, finalizing"
+    finalize_pool_from_recovery && return 0
   fi
 
-  log "deploy FAILED"
-  tail -5 /tmp/deploy.log
+  log "  deploy FAILED (both attempts)"
+  log "  --- deploy1 tail ---"
+  tail -5 /tmp/deploy1.log >> "$LOG_FILE" 2>&1
+  log "  --- deploy2 tail ---"
+  tail -5 /tmp/deploy2.log >> "$LOG_FILE" 2>&1
   return 1
 }
 
 # ---------- Fund PN with SHELL via giver ----------
 fund_pn() {
   local pn_addr="$1"
-  log "funding $pn_addr with 1000 SHELL..."
-  tvm-cli -u "$ENDPOINT" call "${GIVER}::${GIVER}" sendCurrency \
+  log "funding $pn_addr with 1000 SHELL via giver..."
+  timeout 30 tvm-cli -u "$ENDPOINT" call "${GIVER}::${GIVER}" sendCurrency \
     "{\"dest\":\"$pn_addr\",\"value\":\"1000000000\",\"ecc\":{\"2\":\"1000000000000\"}}" \
-    --abi /tmp/abi/GiverV3.abi.json 2>&1 | grep -E "aborted|exit_code" | head -1
+    --abi /tmp/abi/GiverV3.abi.json 2>&1 | grep -E "aborted|exit_code" | head -1 | tee -a "$LOG_FILE"
   sleep 3
 }
 
-# ---------- Scan markets for active ask ----------
+# ---------- Find an active ask ----------
 find_ask() {
   log "scanning markets for active ask..."
-  dexdo market-data list --limit 200 2>/dev/null \
+  timeout 30 dexdo market-data list --limit 200 2>/dev/null \
     | grep -E "^market address=" \
     | awk -F'[= ]' '{
         addr=""; model=""; status="";
@@ -194,7 +188,9 @@ find_ask() {
         }
         if(status=="TRADING" && model ~ /--.*--/) print addr, model
       }' > /tmp/markets.txt
-  log "  $(wc -l < /tmp/markets.txt) canonical markets"
+  local mcount
+  mcount=$(wc -l < /tmp/markets.txt 2>/dev/null || echo 0)
+  log "  $mcount canonical markets"
 
   local scanned=0
   while IFS=' ' read -r maddr mmodel; do
@@ -212,7 +208,7 @@ find_ask() {
     oc=$(echo "$stats" | grep '"orderCount":' | grep -oE '"[0-9]+"' | tr -d '"')
     [ -z "$oc" ] && continue
     [ "$oc" = "0" ] && continue
-    log "  FOUND: $mmodel (orderCount=$oc)"
+    log "  FOUND ask: $mmodel (orderCount=$oc)"
     echo "$mmodel"
     return 0
   done < /tmp/markets.txt
@@ -221,10 +217,10 @@ find_ask() {
 
 # ---------- Buy + close ----------
 do_buy_and_close() {
-  local pn_addr="$1" pn_key="$2" pool="$3" model="$4"
+  local pn_addr="$1" pn_key="$2" model="$3"
   log "buying: $model pn=$pn_addr"
 
-  DEXDO_PN_POOL="$pool" dexdo buyer \
+  DEXDO_PN_POOL="$POOL" dexdo buyer \
     --note-addr "$pn_addr" \
     --note-key <(echo "$pn_key") \
     --frame-model "$model" --ticks 2 --max-price-per-tick 1000 \
@@ -273,17 +269,31 @@ do_withdraw() {
 
 # ---------- Main ----------
 main() {
+  : > "$LOG_FILE"
   setup
 
-  local pool="/tmp/pn_pool.json" rec="/tmp/pn_pool.json.recovery.json"
-  if ! deploy_pn "$pool" "$rec"; then
-    log "deploy failed; aborting run (will retry next cron)"
+  # Always start clean — fresh owner key, fresh recovery, fresh pool
+  rm -f "$POOL" "$RECOVERY"
+
+  if ! deploy_pn; then
+    log "deploy failed; aborting (will retry next cron)"
+    # salvage: if PN exists on-chain, withdraw it to dest wallet
+    pn_addr=$(recovery_get pn_address)
+    pn_key=$(recovery_get owner_secret_key_hex)
+    if [ -n "$pn_addr" ] && [ -n "$pn_key" ]; then
+      log "salvaging: withdrawing PN $pn_addr -> $DEST_WALLET"
+      do_withdraw "$pn_addr" "$pn_key"
+    fi
     exit 1
   fi
 
   local pn_addr pn_key
-  pn_addr=$(python3 -c "import json; print(json.load(open('$pool'))['notes'][-1]['address'])")
-  pn_key=$(python3 -c "import json; print(json.load(open('$pool'))['notes'][-1]['owner_secret_key_hex'])")
+  pn_addr=$(python3 -c "import json; print(json.load(open('$POOL'))['notes'][-1]['address'])" 2>/dev/null)
+  pn_key=$(python3 -c "import json; print(json.load(open('$POOL'))['notes'][-1]['owner_secret_key_hex'])" 2>/dev/null)
+  if [ -z "$pn_addr" ] || [ -z "$pn_key" ]; then
+    log "FATAL: pool has no note. Aborting."
+    exit 1
+  fi
   log "PN: $pn_addr"
 
   fund_pn "$pn_addr"
@@ -297,13 +307,12 @@ main() {
     exit 0
   fi
 
-  do_buy_and_close "$pn_addr" "$pn_key" "$pool" "$model"
+  do_buy_and_close "$pn_addr" "$pn_key" "$model"
   do_withdraw "$pn_addr" "$pn_key"
 
-  # final wallet balance
   log "=== final wallet balance ==="
   tvm-cli -u "$ENDPOINT" account "${DEST_WALLET#0:}::${DEST_WALLET#0:}" 2>/dev/null \
-    | grep -E "balance|ecc|acc_type" | head -5 | tee -a "$LOG_FILE"
+    | grep -E "balance|ecc" | head -3 | tee -a "$LOG_FILE"
   log "=== cycle done (with buy) ==="
 }
 
