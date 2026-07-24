@@ -126,8 +126,8 @@ deploy_pn() {
     finalize_pool_from_recovery && return 0
   fi
 
-  log "  attempt 1 (bounded 6 min)"
-  timeout 360 dexdo note deploy \
+  log "  attempt 1 (bounded 12 min)"
+  timeout 720 dexdo note deploy \
     --multisig-address "$WALLET_ADDR" \
     --multisig-seed-file "$WALLET_SEED_FILE" \
     --nominal N10000 --token-type nackl \
@@ -140,10 +140,10 @@ deploy_pn() {
     finalize_pool_from_recovery && return 0
   fi
 
-  log "  attempt 2: resume (bounded 4 min)"
+  log "  attempt 2: resume (bounded 8 min)"
   rm -f /tmp/dexdo-note-deploy-wallet-*.lock
   sleep 3
-  timeout 240 dexdo note deploy \
+  timeout 480 dexdo note deploy \
     --multisig-address "$WALLET_ADDR" \
     --multisig-seed-file "$WALLET_SEED_FILE" \
     --nominal N10000 --token-type nackl \

@@ -18,7 +18,7 @@ permissions:
 jobs:
   farm:
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
