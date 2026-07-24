@@ -111,10 +111,85 @@ EOF
   [ -f "$POOL" ]
 }
 
+# ---------- Ensure funding wallet has NACKL + SHELL + VMSHELL ----------
+# dexdo note deploy needs NACKL (ECC[1]) for the PN deposit;
+# the wallet also needs VMSHELL gas for transactions.
+ensure_wallet_funded() {
+  log "checking funding wallet balance..."
+  local bare="${WALLET_ADDR#0:}"
+  local out
+  out=$(timeout 30 tvm-cli -u "$ENDPOINT" account "${bare}::${bare}" 2>/dev/null)
+  if [ -z "$out" ]; then
+    log "  WARN: cannot read wallet balance"
+    return 0
+  fi
+  local ecc_line
+  ecc_line=$(echo "$out" | grep "^ecc:" | head -1)
+  log "  wallet ecc: $ecc_line"
+
+  # Extract ECC[1] (NACKL) and ECC[2] (SHELL) and balance (VMSHELL)
+  local nackl_raw shell_raw vmshell_raw
+  nackl_raw=$(echo "$ecc_line" | python3 -c "
+import json, sys, re
+m = re.search(r'\"1\":\"([0-9]+)\"', sys.stdin.read())
+print(m.group(1) if m else '0')
+" 2>/dev/null)
+  shell_raw=$(echo "$ecc_line" | python3 -c "
+import json, sys, re
+m = re.search(r'\"2\":\"([0-9]+)\"', sys.stdin.read())
+print(m.group(1) if m else '0')
+" 2>/dev/null)
+  vmshell_raw=$(echo "$out" | grep "^balance:" | grep -oE "[0-9]+" | head -1)
+  [ -z "$vmshell_raw" ] && vmshell_raw=0
+  log "  NACKL=$nackl_raw  SHELL=$shell_raw  VMSHELL=$vmshell_raw"
+
+  # Top up if low. Thresholds: 20000 NACKL, 2000 SHELL, 50 VMSHELL
+  local need_nackl=0 need_shell=0 need_vmshell=0
+  if [ -z "$nackl_raw" ] || [ "$nackl_raw" -lt 20000000000000 ]; then
+    need_nackl=50000  # +50000 NACKL
+  fi
+  if [ -z "$shell_raw" ] || [ "$shell_raw" -lt 2000000000000 ]; then
+    need_shell=2000  # +2000 SHELL
+  fi
+  if [ -z "$vmshell_raw" ] || [ "$vmshell_raw" -lt 50000000000 ]; then
+    need_vmshell=500  # +500 VMSHELL (for gas)
+  fi
+
+  if [ $need_nackl -gt 0 ] || [ $need_shell -gt 0 ]; then
+    log "  topping up: +$need_nackl NACKL, +$need_shell SHELL"
+    local ecc_arg="{}"
+    if [ $need_nackl -gt 0 ] && [ $need_shell -gt 0 ]; then
+      ecc_arg="{\"1\":\"$((need_nackl * 1000000000))\",\"2\":\"$((need_shell * 1000000000))\"}"
+    elif [ $need_nackl -gt 0 ]; then
+      ecc_arg="{\"1\":\"$((need_nackl * 1000000000))\"}"
+    else
+      ecc_arg="{\"2\":\"$((need_shell * 1000000000))\"}"
+    fi
+    local value="0"
+    [ $need_vmshell -gt 0 ] && value="$((need_vmshell * 1000000000))"
+    timeout 30 tvm-cli -u "$ENDPOINT" call "${GIVER}::${GIVER}" sendCurrency \
+      "{\"dest\":\"$WALLET_ADDR\",\"value\":\"$value\",\"ecc\":$ecc_arg}" \
+      --abi /tmp/abi/GiverV3.abi.json 2>&1 | grep -E "aborted|exit_code" | head -1 | tee -a "$LOG_FILE"
+    sleep 3
+  fi
+
+  # Top up VMSHELL alone if still low (sendCurrency doesn't add VMSHELL if value=0)
+  if [ $need_vmshell -gt 0 ]; then
+    log "  topping up VMSHELL gas: +$need_vmshell"
+    timeout 30 tvm-cli -u "$ENDPOINT" call "${GIVER}::${GIVER}" sendCurrency \
+      "{\"dest\":\"$WALLET_ADDR\",\"value\":\"$((need_vmshell * 1000000000))\",\"ecc\":{}}" \
+      --abi /tmp/abi/GiverV3.abi.json 2>&1 | grep -E "aborted|exit_code" | head -1 | tee -a "$LOG_FILE"
+    sleep 3
+  fi
+}
+
 # ---------- Deploy PN (multi-attempt with smart recovery) ----------
 deploy_pn() {
   log "deploying PN -> $POOL"
   rm -f /tmp/dexdo-note-deploy-wallet-*.lock
+
+  # Make sure wallet has NACKL/SHELL/VMSHELL before deploying
+  ensure_wallet_funded
 
   if [ -f "$POOL" ]; then
     log "  pool already exists"
