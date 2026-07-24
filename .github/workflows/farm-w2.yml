@@ -1,14 +1,14 @@
-name: DEX.DO Farmer
+name: DEX.DO Farmer (Wallet 2)
 
 on:
   schedule:
-    # Every 20 minutes — gives 5 min gap between runs (run timeout is 15 min)
-    - cron: '*/20 * * * *'
+    # Offset by 10 minutes from farm.yml (cron=*/20) so wallet-2 runs interleaved
+    - cron: '10,30,50 * * * *'
   workflow_dispatch:
 
-# Prevent overlapping runs (wallet nonce lock)
+# Separate concurrency group — wallet 2 has its own nonce lock
 concurrency:
-  group: dexdo-farmer-single
+  group: dexdo-farmer-wallet2
   cancel-in-progress: false
 
 permissions:
@@ -31,15 +31,15 @@ jobs:
             /tmp/contracts
           key: dexdo-tvm-tools-v2
 
-      - name: Restore PN recovery state
+      - name: Restore PN recovery state (wallet 2)
         uses: actions/cache@v4
         with:
           path: |
             /tmp/pn_pool.json
             /tmp/pn_pool.json.recovery.json
-          key: pn-recovery-state
+          key: pn-recovery-state-w2
           restore-keys: |
-            pn-recovery-state
+            pn-recovery-state-w2
 
       - name: Prepare dirs
         run: |
@@ -48,14 +48,14 @@ jobs:
 
       - name: Write wallet seed
         env:
-          WALLET_SEED: ${{ secrets.WALLET_SEED }}
+          WALLET_SEED: ${{ secrets.WALLET2_SEED }}
         run: |
           printf '%s\n' "$WALLET_SEED" > /tmp/wallet.seed
           chmod 600 /tmp/wallet.seed
 
-      - name: Run one farm cycle
+      - name: Run one farm cycle (wallet 2)
         env:
-          WALLET_ADDR: ${{ secrets.WALLET_ADDR }}
+          WALLET_ADDR: ${{ secrets.WALLET2_ADDR }}
           WALLET_SEED_FILE: /tmp/wallet.seed
           DEST_WALLET: ${{ secrets.DEST_WALLET }}
           PN_POOL: /tmp/pn_pool.json
@@ -63,7 +63,7 @@ jobs:
         run: |
           bash cycle.sh
           if [ -f /tmp/cycle.log ]; then
-            echo "### Cycle log" >> $GITHUB_STEP_SUMMARY
+            echo "### Cycle log (wallet 2)" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             tail -50 /tmp/cycle.log >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
@@ -74,22 +74,22 @@ jobs:
         run: |
           git config user.email "farmer@dexdo.local"
           git config user.name "dexdo-farmer"
-          mkdir -p logs
+          mkdir -p logs-w2
           TS=$(date -u +%Y%m%dT%H%M%SZ)
           if [ -f /tmp/cycle.log ]; then
-            cp /tmp/cycle.log "logs/cycle_${TS}.log"
-            ls -t logs/cycle_*.log 2>/dev/null | tail -n +51 | xargs -r rm
-            git add -f logs/
-            git commit -m "cycle ${TS}" || echo "nothing to commit"
+            cp /tmp/cycle.log "logs-w2/cycle_${TS}.log"
+            ls -t logs-w2/cycle_*.log 2>/dev/null | tail -n +51 | xargs -r rm
+            git add -f logs-w2/
+            git commit -m "w2 cycle ${TS}" || echo "nothing to commit"
             git pull --rebase origin main 2>/dev/null || true
             git push || echo "push failed (non-fatal)"
           fi
 
-      - name: Save PN recovery state
+      - name: Save PN recovery state (wallet 2)
         if: always()
         uses: actions/cache/save@v4
         with:
           path: |
             /tmp/pn_pool.json
             /tmp/pn_pool.json.recovery.json
-          key: pn-recovery-state-${{ github.run_id }}-${{ github.run_attempt }}
+          key: pn-recovery-state-w2-${{ github.run_id }}-${{ github.run_attempt }}

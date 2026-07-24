@@ -290,6 +290,92 @@ find_ask() {
   return 1
 }
 
+# Scan markets, but also verify the seller's PN is NOT ours (anti-self-trading).
+# Also accepts an optional "buyer_pn_addr" arg to filter out our own PNs.
+# Returns model name if a third-party ask is found.
+find_ask_third_party() {
+  local buyer_pn_addr="${1:-}"
+  log "scanning markets for third-party ask (excluding $buyer_pn_addr)..."
+  [ -s /tmp/markets.txt ] || {
+    timeout 30 dexdo market-data list --limit 200 2>/dev/null \
+      | grep -E "^market address=" \
+      | awk -F'[= ]' '{
+          addr=""; model=""; status="";
+          for(i=1;i<=NF;i++){
+            if($(i-1)=="address") addr=$i;
+            if($(i-1)=="model_ref") model=$i;
+            if($(i-1)=="status") status=$i;
+          }
+          if(status=="TRADING" && model ~ /--.*--/) print addr, model
+        }' > /tmp/markets.txt
+  }
+
+  local scanned=0
+  while IFS=' ' read -r maddr mmodel; do
+    [ -z "$maddr" ] && continue
+    scanned=$((scanned+1))
+    [ $scanned -gt 30 ] && break
+    local bare="${maddr#0:}"
+    local out
+    out=$(timeout 12 tvm-cli -u "$ENDPOINT" run --abi /tmp/abi/InferenceOrderBook.abi.json \
+      "${bare}::${bare}" getBestBidAsk '{}' 2>/dev/null) || continue
+    echo "$out" | grep -q '"hasAsk": true' || continue
+    local stats oc next_id
+    stats=$(timeout 12 tvm-cli -u "$ENDPOINT" run --abi /tmp/abi/InferenceOrderBook.abi.json \
+      "${bare}::${bare}" getStats '{}' 2>/dev/null) || continue
+    oc=$(echo "$stats" | grep '"orderCount":' | grep -oE '"[0-9]+"' | tr -d '"')
+    [ -z "$oc" ] && continue
+    [ "$oc" = "0" ] && continue
+    next_id=$(echo "$stats" | grep '"nextOrderId":' | grep -oE '"[0-9]+"' | tr -d '"')
+    # Find the active order (scan last 5 ids)
+    local seller="" tc="" price="" amount=""
+    local start_id=$((next_id > 5 ? next_id - 5 : 1))
+    [ $start_id -lt 1 ] && start_id=1
+    for oid in $(seq $start_id $next_id); do
+      local order_out
+      order_out=$(timeout 12 tvm-cli -u "$ENDPOINT" run --abi /tmp/abi/InferenceOrderBook.abi.json \
+        "${bare}::${bare}" getOrder "{\"id\":\"$oid\"}" 2>/dev/null) || continue
+      amount=$(echo "$order_out" | grep '"amount":' | grep -oE '"[0-9]+"' | tr -d '"')
+      [ -z "$amount" ] && continue
+      [ "$amount" = "0" ] && continue
+      seller=$(echo "$order_out" | grep '"note":' | grep -oE '0:[0-9a-f]{64}' | head -1)
+      tc=$(echo "$order_out" | grep '"tokenContract":' | grep -oE '0:[0-9a-f]{64}' | head -1)
+      price=$(echo "$order_out" | grep '"price":' | grep -oE '0x[0-9a-f]+' | head -1)
+      break
+    done
+    [ -z "$seller" ] && continue
+    # Anti-self-trading: skip if seller is our own PN
+    if [ -n "$buyer_pn_addr" ] && [ "$seller" = "$buyer_pn_addr" ]; then
+      log "  SKIP self-trade: $mmodel seller=$seller (= buyer)"
+      continue
+    fi
+    log "  FOUND third-party ask: $mmodel | seller=$seller | price=$price | amount=$amount"
+    echo "$mmodel"
+    return 0
+  done < /tmp/markets.txt
+  return 1
+}
+
+# Try to find a third-party ask, retrying up to N times with delay
+find_ask_with_wait() {
+  local buyer_pn_addr="${1:-}"
+  local max_attempts="${2:-6}"   # 6 attempts × 30s = 3 min max wait
+  local attempt=1
+  while [ $attempt -le $max_attempts ]; do
+    log "find_ask attempt $attempt/$max_attempts"
+    local model
+    model=$(find_ask_third_party "$buyer_pn_addr")
+    if [ -n "$model" ]; then
+      echo "$model"
+      return 0
+    fi
+    [ $attempt -lt $max_attempts ] && sleep 30
+    attempt=$((attempt+1))
+  done
+  log "  no third-party ask found after $max_attempts attempts"
+  return 1
+}
+
 # ---------- Buy + close ----------
 do_buy_and_close() {
   local pn_addr="$1" pn_key="$2" model="$3"
@@ -383,12 +469,14 @@ main() {
 
   fund_pn "$pn_addr"
 
+  # Find a third-party ask (anti-self-trade: skip if seller = our PN).
+  # Wait up to 3 minutes (6 attempts × 30s) for an external seller to appear.
   local model
-  model=$(find_ask)
+  model=$(find_ask_with_wait "$pn_addr" 6)
   if [ -z "$model" ]; then
-    log "no active asks; withdrawing PN unused"
+    log "no third-party asks; withdrawing PN unused (no real consumption this cycle)"
     do_withdraw "$pn_addr" "$pn_key"
-    log "=== cycle done (no ask) ==="
+    log "=== cycle done (no third-party ask) ==="
     exit 0
   fi
 
